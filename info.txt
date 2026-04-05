@@ -1,0 +1,94 @@
+can the  deployment to k8s also be done using gitlab pipelines?
+
+
+Yes.
+
+GitLab CI can build the image and deploy it to Kubernetes in the same pipeline. Kubernetes does not pull from your repo by itself; the pipeline would run helm upgrade --install ... after the image is built and pushed.
+
+What That Means Practically
+
+Your pipeline can become:
+
+verify
+package
+container
+deploy
+The new deploy job would:
+
+connect to the Kubernetes cluster
+run Helm against k8s/helm/atlas-execution-processor
+pass the right values file
+set the image tag to the image just built in the same pipeline
+What You Need First
+
+Before GitLab can deploy to K8s, you need one of these:
+
+a kubeconfig stored in GitLab CI variables
+or your company’s GitLab Kubernetes Agent setup
+And you need:
+
+a runner image that has helm and kubectl
+cluster permissions to create/update Deployments, ConfigMaps, Secrets, Services in the target namespace
+a real values file for that environment
+Recommended First Step
+
+Since you are new to this, I would make deployment a manual job first, not automatic.
+
+So:
+
+MR: only verify
+merge to develop: verify, package, container
+then a manual deploy-dev job appears in GitLab, and you click it when ready
+That is much safer than auto-deploying immediately.
+
+Typical Deploy Job Shape
+
+A deploy job would look roughly like this:
+
+deploy-uat1-amer:
+  stage: deploy
+  image: alpine/helm:3.17.0
+  needs:
+    - job: container
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "develop"'
+      when: manual
+  script:
+    - mkdir -p ~/.kube
+    - echo "$KUBE_CONFIG_B64" | base64 -d > ~/.kube/config
+    - helm upgrade --install aep-uat1-amer-test ./k8s/helm/atlas-execution-processor \
+        -n aep-uat1-amer-test \
+        --create-namespace \
+        -f ./k8s/helm/atlas-execution-processor/values-uat1-amer-test.yaml \
+        --set image.repository="$CI_REGISTRY_IMAGE" \
+        --set image.tag="$CI_COMMIT_SHA"
+This would deploy the image built in that same pipeline.
+
+How Image Push And Deploy Connect
+
+Your current pipeline already pushes the image to the GitLab registry. The deploy job then uses:
+
+image.repository = $CI_REGISTRY_IMAGE
+image.tag = $CI_COMMIT_SHA
+So the exact image built by that pipeline is the one deployed.
+
+Good Deployment Model
+
+For now, I would suggest:
+
+develop builds and pushes image automatically
+deploy-uat1-amer is manual
+later, add more deploy jobs like:
+deploy-uat1-emea
+deploy-uat1-apac
+deploy-prod with stricter controls
+Important Note
+
+Even if deployment is in GitLab CI, Helm is still the deployment mechanism. GitLab is only the runner that executes Helm.
+
+So the answer is:
+
+yes, GitLab pipeline can deploy to K8s
+the normal way is to add a deploy stage that runs helm upgrade --install
+for your first version, I strongly recommend making that deploy job manual
+If you want, I can add a deploy stage to .gitlab-ci.yml next, in a safe manual form for your first test environment.
