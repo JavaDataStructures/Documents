@@ -1,0 +1,28 @@
+SELECT 
+    b.alternate_id AS alternate_id_positionAccount,
+    i.alternate_id AS alternate_id_securityID,
+    'SecurityIDSource_ESMP' AS hardcodedEnum_securityIDSource,
+    c.alternate_id AS alternate_id_customerAccount
+FROM 
+    -- 1. Book: Get an active Level 5 Settlement Account (Schema ID 5)
+    (SELECT bai.alternate_id
+     FROM book b
+     JOIN book_alternate_ids bai ON bai.parent_id = b.id AND bai.parent_version = b.version
+     WHERE b.book_level = 5 AND bai.schema_id = 5 AND b.record_status = 1
+     FETCH FIRST 5 ROWS ONLY) b
+CROSS JOIN
+    -- 2. Instrument: Get an active ESMP mapped to a SECURITY_LISTING
+    (SELECT uai.alternate_id
+     FROM underlying u
+     JOIN und_adjusted_und_alternate_ids uai ON uai.parent_id = u.id AND uai.parent_version = u.version
+     JOIN alternate_underlying_id_schema aus ON uai.schema_id = aus.id
+     WHERE u.record_status = 1 AND u.underlying_type = 'SECURITY_LISTING' AND u.active = 'Y'
+       AND aus.code = 'ESMP' AND aus.record_status = 1 AND uai.alternate_id IS NOT NULL
+     FETCH FIRST 5 ROWS ONLY) i
+CROSS JOIN
+    -- 3. Counterparty: Get an active FISS ID (Schema ID 1)
+    (SELECT pai.alternate_id
+     FROM party p
+     JOIN party_alternate_ids pai ON pai.parent_id = p.id AND pai.parent_version = p.version
+     WHERE p.record_status = 1 AND pai.schema_id = 1 AND pai.alternate_id IS NOT NULL
+     FETCH FIRST 5 ROWS ONLY) c;
