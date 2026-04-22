@@ -1,6 +1,7 @@
 SELECT 
     b.alternate_id AS alternate_id_positionAccount,
     i.alternate_id AS alternate_id_securityID,
+    i.underlying_type AS underlying_type_flowIndicator,
     'SecurityIDSource_ESMP' AS hardcodedEnum_securityIDSource,
     c.alternate_id AS alternate_id_customerAccount
 FROM 
@@ -11,14 +12,30 @@ FROM
      WHERE b.book_level = 5 AND bai.schema_id = 5 AND b.record_status = 1
      FETCH FIRST 5 ROWS ONLY) b
 CROSS JOIN
-    -- 2. Instrument: Get an active ESMP mapped to a SECURITY_LISTING
-    (SELECT uai.alternate_id
-     FROM underlying u
-     JOIN und_adjusted_und_alternate_ids uai ON uai.parent_id = u.id AND uai.parent_version = u.version
-     JOIN alternate_underlying_id_schema aus ON uai.schema_id = aus.id
-     WHERE u.record_status = 1 AND u.underlying_type = 'SECURITY_LISTING' AND u.active = 'Y'
-       AND aus.code = 'ESMP' AND aus.record_status = 1 AND uai.alternate_id IS NOT NULL
-     FETCH FIRST 5 ROWS ONLY) i
+    -- 2. Instrument: Get a mix of ESMPs for both Equity (SECURITY) and Options/Futures (DERIVATIVE)
+    (
+      SELECT alternate_id, underlying_type FROM (
+          SELECT uai.alternate_id, u.underlying_type
+          FROM underlying u
+          JOIN und_adjusted_und_alternate_ids uai ON uai.parent_id = u.id AND uai.parent_version = u.version
+          JOIN alternate_underlying_id_schema aus ON uai.schema_id = aus.id
+          WHERE u.record_status = 1 AND u.active = 'Y' 
+            AND aus.code = 'ESMP' AND aus.record_status = 1 AND uai.alternate_id IS NOT NULL
+            AND u.underlying_type = 'SECURITY_LISTING'
+          FETCH FIRST 3 ROWS ONLY
+      )
+      UNION ALL
+      SELECT alternate_id, underlying_type FROM (
+          SELECT uai.alternate_id, u.underlying_type
+          FROM underlying u
+          JOIN und_adjusted_und_alternate_ids uai ON uai.parent_id = u.id AND uai.parent_version = u.version
+          JOIN alternate_underlying_id_schema aus ON uai.schema_id = aus.id
+          WHERE u.record_status = 1 AND u.active = 'Y' 
+            AND aus.code = 'ESMP' AND aus.record_status = 1 AND uai.alternate_id IS NOT NULL
+            AND u.underlying_type = 'DERIVATIVE_LISTING'
+          FETCH FIRST 3 ROWS ONLY
+      )
+    ) i
 CROSS JOIN
     -- 3. Counterparty: Get an active FISS ID (Schema ID 1)
     (SELECT pai.alternate_id
